@@ -1,0 +1,39 @@
+create or replace view cux_all_arguments_v as
+Select Nvl((Select Nvl(Max(s.Sequence),
+                      0)
+             From All_Arguments s
+            Where s.Data_Level = x.Data_Level - 1
+              And s.Sequence < x.Sequence
+              And s.Object_Id = x.Object_Id
+              And s.Object_Name = x.Object_Name
+              And s.Package_Name = x.Package_Name),
+           0) As Parent_Sequence,
+       x."OWNER",
+       x."OBJECT_NAME",
+       x."PACKAGE_NAME",
+       x."OBJECT_ID",
+       x."OVERLOAD",
+       x."SUBPROGRAM_ID",
+       x."ARGUMENT_NAME",
+       x."POSITION",
+       x."SEQUENCE",
+       x."DATA_LEVEL",
+       x."DATA_TYPE",
+       x."DEFAULTED",
+       x."DEFAULT_VALUE",
+       x."DEFAULT_LENGTH",
+       x."IN_OUT",
+       x."DATA_LENGTH",
+       x."DATA_PRECISION",
+       x."DATA_SCALE",
+       x."RADIX",
+       x."CHARACTER_SET_NAME",
+       x."TYPE_OWNER",
+       x."TYPE_NAME",
+       x."TYPE_SUBNAME",
+       x."TYPE_LINK",
+       x."PLS_TYPE",
+       x."CHAR_LENGTH",
+       x."CHAR_USED"
+
+  From All_Arguments x;
