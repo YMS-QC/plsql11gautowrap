@@ -1,14 +1,5 @@
 create or replace view cux_all_arguments_v as
-Select Nvl((Select Nvl(Max(s.Sequence),
-                      0)
-             From All_Arguments s
-            Where s.Data_Level = x.Data_Level - 1
-              And s.Sequence < x.Sequence
-              And s.Object_Id = x.Object_Id
-              And s.Object_Name = x.Object_Name
-              And s.Package_Name = x.Package_Name),
-           0) As Parent_Sequence,
-       x."OWNER",
+Select x."OWNER",
        x."OBJECT_NAME",
        x."PACKAGE_NAME",
        x."OBJECT_ID",
@@ -17,6 +8,15 @@ Select Nvl((Select Nvl(Max(s.Sequence),
        x."ARGUMENT_NAME",
        x."POSITION",
        x."SEQUENCE",
+       Nvl((Select Nvl(Max(s.Sequence),
+                      0)
+             From All_Arguments s
+            Where s.Data_Level = x.Data_Level - 1
+              And s.Sequence < x.Sequence
+              And s.Object_Id = x.Object_Id
+              And s.Object_Name = x.Object_Name
+              And s.Package_Name = x.Package_Name),
+           0) As Parent_Sequence,
        x."DATA_LEVEL",
        x."DATA_TYPE",
        x."DEFAULTED",
@@ -34,6 +34,17 @@ Select Nvl((Select Nvl(Max(s.Sequence),
        x."TYPE_LINK",
        x."PLS_TYPE",
        x."CHAR_LENGTH",
-       x."CHAR_USED"
+       x."CHAR_USED",
+       Case When x.data_type In ('PL/SQL TABLE','PL/SQL RECORD') Then
+       Type_Name || '$' || Type_Subname  Else Null End As Orig_Typename,
+       
+       Case When x.data_type In ('PL/SQL TABLE','PL/SQL RECORD') Then
+       First_Value(Substr(Type_Name || '$' || Type_Subname,
+                          0,
+                          (30 -
+                          Lengthb('$' || Object_Id || '_' || Subprogram_Id || '_' ||
+                                   Sequence))) ||
+                   ('$' || Object_Id || '_' || Subprogram_Id || '_' ||
+                    Sequence)) Over(Partition By Object_Id, Package_Name, Object_Name, Type_Name || '$' || Type_Subname Order By Sequence Desc) Else Null End  As Wrapped_Objname
 
   From All_Arguments x;

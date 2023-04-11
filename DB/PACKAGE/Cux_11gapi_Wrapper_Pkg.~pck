@@ -10,11 +10,11 @@ Create Or Replace Package Cux_11gapi_Wrapper_Pkg Is
   (p_Package_Name In Varchar2,
    p_Object_Name  In Varchar2,
    p_Parent_Seq   In Pls_Integer Default Null,
-   p_Ddl_Clob     Out Varchar2);
+   p_Ddl_Clob     Out Clob);
 
   Procedure Get_Wrappck_Spc_Ddl(p_Package_Name In Varchar2,
                                 p_Object_Name  In Varchar2);
-                                
+
   Procedure Get_Wrappck_Bdy_Ddl(p_Package_Name In Varchar2,
                                 p_Object_Name  In Varchar2);
 
@@ -62,7 +62,7 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
   (p_Package_Name In Varchar2,
    p_Object_Name  In Varchar2,
    p_Parent_Seq   In Pls_Integer Default Null,
-   p_Ddl_Clob     Out Varchar2)
+   p_Ddl_Clob     Out Clob)
   
    Is
   
@@ -83,8 +83,7 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
                    And v.Package_Name = Upper(p_Package_Name)
                    And v.Object_Name = Upper(p_Object_Name)
                    And (v.Sequence = p_Parent_Seq Or p_Parent_Seq Is Null)
-                   And v.Data_Type In ('PL/SQL TABLE',
-                                       'PL/SQL RECORD')
+                   And v.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD')
                  Order By Sequence Desc) Loop
     
       /*
@@ -93,8 +92,7 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
     
       If Rec.Data_Type = 'PL/SQL TABLE' Then
       
-        Put_Line('CREATE OR REPLACE TYPE ' || Rec.Wrapped_Objname || ' ' || '/*' ||
-                 Rec.Type_Name || '$' || Rec.Type_Subname || '*/' ||
+        Put_Line('CREATE OR REPLACE TYPE ' || Rec.Wrapped_Objname || ' ' ||
                  ' FORCE AS TABLE OF ');
       
         For Rec_Sub In (Select *
@@ -102,33 +100,31 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
                          Where v.Parent_Sequence = Rec.Sequence
                            And v.Object_Id = Rec.Object_Id
                            And v.Package_Name = Rec.Package_Name
-                           And v.Object_Name = Rec.Object_Name) Loop
+                           And v.Object_Name = Rec.Object_Name
+                         Order By Sequence Asc) Loop
           If Rec_Sub.Data_Type = 'PL/SQL RECORD' Then
-            Put_Line(Rec_Sub.Wrapped_Objname || '/*' || Rec_Sub.Type_Name || '$' ||
-                     Rec_Sub.Type_Subname || '*/');
+            Put_Line(Rec_Sub.Wrapped_Objname);
           Else
             Put_Line(Rec_Sub.Argument_Name || '  ' || Rec_Sub.Data_Type || '');
           End If;
         
           Put_Line(';');
         End Loop;
-      
+        Put_Line('/');
       End If;
     
       If Rec.Data_Type = 'PL/SQL RECORD' Then
       
-        Put_Line('CREATE OR REPLACE TYPE ' || Rec.Wrapped_Objname || ' ' || '/*' ||
-                 Rec.Type_Name || '$' || Rec.Type_Subname || '*/' ||
-                 ' FORCE AS OBJECT ( ');
+        Put_Line('CREATE OR REPLACE TYPE ' || Rec.Wrapped_Objname ||
+                 ' FORCE AS OBJECT( ');
       
-        For Rec_Sub In (Select v.*,
-                               Rownum As Row_Num,
-                               Count(1) Over() As Row_Count
+        For Rec_Sub In (Select v.*, Max(Sequence) Over() As Max_Seq
                           From Cux_All_Arguments_v v
                          Where v.Parent_Sequence = Rec.Sequence
                            And v.Object_Id = Rec.Object_Id
                            And v.Package_Name = Rec.Package_Name
-                           And v.Object_Name = Rec.Object_Name) Loop
+                           And v.Object_Name = Rec.Object_Name
+                         Order By Sequence Asc) Loop
         
           If Rec_Sub.Data_Type <> 'PL/SQL RECORD' And
              Rec_Sub.Data_Type <> 'PL/SQL TABLE' Then
@@ -137,18 +133,18 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
           
           Else
           
-            Put(Rec_Sub.Argument_Name || '  ' || Rec_Sub.Wrapped_Objname || '  ' || '/*' ||
-                Rec_Sub.Type_Name || '$' || Rec_Sub.Type_Subname || '*/');
+            Put(Rec_Sub.Argument_Name || ' ' || Rec_Sub.Wrapped_Objname || '  ');
           End If;
-          If Rec_Sub.Row_Num < Rec_Sub.Row_Count Then
+        
+          If Rec_Sub.Sequence < Rec_Sub.Max_Seq Then
             Put_Line(',');
           Else
-            Put_Line('');
+            Put_Line(');');
           End If;
         
         End Loop;
       
-        Put_Line(');');
+        Put_Line('/');
       
       End If;
     
@@ -156,35 +152,34 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
   
     --把所有顶层参数包裹成为一个对象
   
-    For Rec In (Select v.*,
-                       Max(v.Sequence) Over() As Max_Seq
-                  From Cux_All_Arguments_v v
-                 Where 1 = 1
-                   And v.Package_Name = Upper(p_Package_Name)
-                   And v.Object_Name = Upper(p_Object_Name)
-                   And (v.Sequence = p_Parent_Seq Or p_Parent_Seq Is Null)
-                   And v.In_Out = 'IN'
-                   And v.Data_Level = 0
-                 Order By Sequence Asc) Loop
+    For Rec_In In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                     From Cux_All_Arguments_v v
+                    Where 1 = 1
+                      And v.Package_Name = Upper(p_Package_Name)
+                      And v.Object_Name = Upper(p_Object_Name)
+                      And (v.Sequence = p_Parent_Seq Or p_Parent_Seq Is Null)
+                      And v.In_Out = 'IN'
+                      And v.Data_Level = 0
+                    Order By Sequence Asc) Loop
     
       ---第一行，输出整体对象的对象头
-      If Rec.Sequence = 1 Then
+      If Rec_In.Sequence = 1 Then
       
         Put_Line('CREATE OR REPLACE TYPE ' ||
                  --
-                 Substr(Rec.Package_Name || '$' || Rec.Object_Name,
+                 Substr(Rec_In.Package_Name || '$' || Rec_In.Object_Name,
                         0,
-                        30 - Lengthb('$in_' || Rec.Object_Id || '_' ||
-                                     Rec.Subprogram_Id)) || '$obj_' ||
-                 Rec.Object_Id || '_' || Rec.Subprogram_Id
+                        30 - Lengthb('$in_' || Rec_In.Object_Id || '_' ||
+                                     Rec_In.Subprogram_Id)) || '$in_' ||
+                 Rec_In.Object_Id || '_' || Rec_In.Subprogram_Id
                  --
                  || ' FORCE AS OBJECT(');
       
       End If;
     
       ---打印参数
-      Put(' ' || Rec.Argument_Name || '  ' || Rec.Wrapped_Objname);
-      If Rec.Sequence <> Rec.Max_Seq Then
+      Put('' || Rec_In.Argument_Name || '  ' || Rec_In.Wrapped_Objname);
+      If Rec_In.Sequence <> Rec_In.Max_Seq Then
         --打印逗号
         Put_Line(',');
       Else
@@ -193,42 +188,43 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
       End If;
     
     End Loop;
-  
-    For Rec In (Select v.*,
-                       Max(v.Sequence) Over() As Max_Seq
-                  From Cux_All_Arguments_v v
-                 Where 1 = 1
-                   And v.Package_Name = Upper(p_Package_Name)
-                   And v.Object_Name = Upper(p_Object_Name)
-                   And (v.Sequence = p_Parent_Seq Or p_Parent_Seq Is Null)
-                   And v.In_Out = 'OUT'
-                   And v.Data_Level = 0
-                 Order By Sequence Asc) Loop
+    Put_Line('/');
+    For Rec_Out In (Select v.*, Max(v.Sequence) Over() As Max_Seq,Min(v.Sequence) Over() As min_Seq
+                      From Cux_All_Arguments_v v
+                     Where 1 = 1
+                       And v.Package_Name = Upper(p_Package_Name)
+                       And v.Object_Name = Upper(p_Object_Name)
+                       And (v.Sequence = p_Parent_Seq Or
+                           p_Parent_Seq Is Null)
+                       And v.In_Out = 'OUT'
+                       And v.Data_Level = 0
+                     Order By Sequence Asc) Loop
     
       ---第一行，输出整体对象的对象头
-      If Rec.Sequence = 1 Then
+      If Rec_Out.Sequence = Rec_Out.min_Seq Then
       
         Put_Line('CREATE OR REPLACE TYPE ' ||
                  --
-                 Substr(Rec.Package_Name || '$' || Rec.Object_Name,
+                 Substr(Rec_Out.Package_Name || '$' || Rec_Out.Object_Name,
                         0,
-                        30 - Lengthb('$out_' || Rec.Object_Id || '_' ||
-                                     Rec.Subprogram_Id)) || '$out_' ||
-                 Rec.Object_Id || '_' || Rec.Subprogram_Id
+                        30 - Lengthb('$out_' || Rec_Out.Object_Id || '_' ||
+                                     Rec_Out.Subprogram_Id)) || '$out_' ||
+                 Rec_Out.Object_Id || '_' || Rec_Out.Subprogram_Id
                  --
                  || ' FORCE AS OBJECT(');
       
       End If;
     
       ---打印参数
-      Put(' ' || Rec.Argument_Name || '  ' || Rec.Wrapped_Objname);
-      If Rec.Sequence <> Rec.Max_Seq Then
+      Put('' || Rec_Out.Argument_Name || '  ' || Rec_Out.Wrapped_Objname);
+      If Rec_Out.Sequence < Rec_Out.Max_Seq Then
         --打印逗号
         Put_Line(',');
       Else
         --最后一行打印括号
         Put_Line(');');
       End If;
+      
     
     End Loop;
   
@@ -246,16 +242,13 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
     ----------------------------
     --create package special   
   
-    For Rec In (Select v.*,
-                       Max(v.Sequence) Over() As Max_Seq
+    For Rec In (Select v.*, Max(v.Sequence) Over() As Max_Seq
                   From Cux_All_Arguments_v v
                  Where 1 = 1
                    And v.Package_Name = Upper(p_Package_Name)
                    And v.Object_Name = Upper(p_Object_Name)
-                   And v.Data_Type In ('PL/SQL TABLE',
-                                       'PL/SQL RECORD')
-                 Order By Sequence Asc
-                ) Loop
+                   And v.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD')
+                 Order By Sequence Asc) Loop
     
       --第一行，声明包名
       If Rec.Sequence = 1 Then
@@ -315,8 +308,7 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
         --datalevel=0
         --打印基础的包裹的过程
       
-        For Rec_Lvl0 In (Select v.*,
-                                Max(v.Sequence) Over() As Max_Seq
+        For Rec_Lvl0 In (Select v.*, Max(v.Sequence) Over() As Max_Seq
                            From Cux_All_Arguments_v v
                           Where 1 = 1
                             And v.Package_Name = Upper(p_Package_Name)
@@ -351,11 +343,9 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
            And v.Package_Name = Upper(p_Package_Name)
            And v.Object_Name = Upper(p_Object_Name)
            And v.Data_Level = 0
-           And v.In_Out In ('IN',
-                            'OUT');
+           And v.In_Out In ('IN', 'OUT');
       
-        If Nvl(l_Countend,
-               0) >= l_Counter Then
+        If Nvl(l_Countend, 0) >= l_Counter Then
         
           For Rec_Bind_Obj In (Select v.*
                                  From Cux_All_Arguments_v v
@@ -443,38 +433,36 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
                                 p_Object_Name  In Varchar2) Is
   
     l_Counter  Pls_Integer := 0;
-    l_Countend Pls_Integer := 0;
-    
-    l_package_name Varchar2(30);
+    l_Countend Pls_Integer := 0;  
+    l_Package_Name Varchar2(30);
   Begin
   
     ----------------------------
     --create package body  
   
-    For Rec In (Select v.*,
-                       Max(v.Sequence) Over() As Max_Seq
+    For Rec In (Select v.*, Max(v.Sequence) Over() As Max_Seq
                   From Cux_All_Arguments_v v
                  Where 1 = 1
                    And v.Package_Name = Upper(p_Package_Name)
                    And v.Object_Name = Upper(p_Object_Name)
-                   And v.Data_Type In ('PL/SQL TABLE',
-                                       'PL/SQL RECORD')
+                   And v.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD')
                  Order By Sequence Asc
                 --不使用倒序，引用函数时需要加包名前缀
                 ) Loop
     
       --第一行，声明包名
       If Rec.Sequence = 1 Then
-        
-        l_package_name :=  Substr(Rec.Package_Name || '$' || Rec.Object_Name,
-                        0,
-                        30 - Lengthb('$pkg_' || Rec.Object_Id || '_' ||
-                                     Rec.Subprogram_Id)) || '$pkg_' ||
-                 Rec.Object_Id || '_' || Rec.Subprogram_Id;
+      
+        l_Package_Name := Substr(Rec.Package_Name || '$' || Rec.Object_Name,
+                                 0,
+                                 30 - Lengthb('$pkg_' || Rec.Object_Id || '_' ||
+                                              Rec.Subprogram_Id)) ||
+                          '$pkg_' || Rec.Object_Id || '_' ||
+                          Rec.Subprogram_Id;
       
         Put_Line('CREATE OR REPLACE PACKAGE BODY ' ||
                  --
-                 l_package_name
+                 l_Package_Name
                  --
                  
                  || ' AS');
@@ -492,19 +480,19 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
       */
       If Rec.In_Out = 'IN' Then
       
-        Put('  FUNCTION ' ||'pltosql_' || Rec.Sequence || '(');
+        Put('  FUNCTION ' || 'pltosql_' || Rec.Sequence || '(');
         Put_Line('p_' || Rec.Sequence || ' ' || Rec.Wrapped_Objname ||
                  ') return ' || Rec.Type_Name || '.' || Rec.Type_Subname ||
                  ' as ');
       
         --定义方式和数据类型有关
         If Rec.Data_Type = 'PL/SQL RECORD' Then
-          Put_Line('    r_' || Rec.Sequence || ' ' || Rec.Type_Name || '.' ||
+          Put_Line('   r_' || Rec.Sequence || ' ' || Rec.Type_Name || '.' ||
                    Rec.Type_Subname || ';');
         Else
           --PL/SQL TABLE
-          Put_Line('    r_' || Rec.Sequence || ' ' || Rec.Type_Name || '.' ||
-                   Rec.Type_Subname || ' index by pls_integer;');
+          Put_Line('   r_' || Rec.Sequence || ' ' || Rec.Type_Name || '.' ||
+                   Rec.Type_Subname || ';');
         End If;
       
         Put_Line('  begin'); --BEGIN
@@ -512,22 +500,20 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
         --数值交换方式和数据类型有关 由于总体游标，我们按照倒序遍历，一般，深层次的转换已经实现了
         If Rec.Data_Type = 'PL/SQL RECORD' Then
           --单行数据，对子层级的对象遍历赋值，遇到嵌套类型，直接用函数转换。
-          For Rec_Sub In (Select v.*,
-                                 Max(v.Sequence) Over() As Max_Seq
+          For Rec_Sub In (Select v.*, Max(v.Sequence) Over() As Max_Seq
                             From Cux_All_Arguments_v v
                            Where 1 = 1
                              And v.Parent_Sequence = Rec.Sequence
                              And v.Package_Name = Upper(p_Package_Name)
                              And v.Object_Name = Upper(p_Object_Name)
-                            
+                          
                            Order By Sequence Desc) Loop
           
-            If Rec_Sub.Data_Type In ('PL/SQL TABLE',
-                                     'PL/SQL RECORD') Then
+            If Rec_Sub.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD') Then
               Put_Line('    r_' || Rec.Sequence || '.' ||
-                       Rec_Sub.Argument_Name || ':=' || l_package_name ||'.pltosql_' ||
-                       Rec_Sub.Sequence || '(' || 'p_' || Rec.Sequence || '.' ||
-                       Rec_Sub.Argument_Name || ');');
+                       Rec_Sub.Argument_Name || ':=' || l_Package_Name ||
+                       '.pltosql_' || Rec_Sub.Sequence || '(' || 'p_' ||
+                       Rec.Sequence || '.' || Rec_Sub.Argument_Name || ');');
             
             Else
               Put_Line('   r_' || Rec.Sequence || '.' ||
@@ -538,22 +524,135 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
           
           End Loop;
         
-        Else --
+        Else
+          --
           --PL/SQL TABLE
           --table需要循环赋值
-          put_line('  if p_'||rec.Sequence||'.count > 0 then');
-          put_line('  for i in 1 .. p_'||rec.Sequence||'.count loop');
+          Put_Line('  if p_' || Rec.Sequence || '.count > 0 then');
+          Put_Line('  for i in 1 .. p_' || Rec.Sequence || '.count loop');
+          --单行数据，对子层级的对象遍历赋值，遇到嵌套类型，直接用函数转换。
+          For Rec_Sub In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                            From Cux_All_Arguments_v v
+                           Where 1 = 1
+                             And v.Parent_Sequence = Rec.Sequence
+                             And v.Package_Name = Upper(p_Package_Name)
+                             And v.Object_Name = Upper(p_Object_Name)
+                          
+                           Order By Sequence Desc) Loop
+          
+            If Rec_Sub.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD') Then
+              Put_Line('    r_' || Rec.Sequence || '(i)' ||
+                       Rec_Sub.Argument_Name || ':=' || l_Package_Name ||
+                       '.pltosql_' || Rec_Sub.Sequence || '(' || 'p_' ||
+                       Rec.Sequence || '(i)' || Rec_Sub.Argument_Name || ');');
             
-          put_line('  end loop;');
-          put_line('  end if;');
+            Else
+              Put_Line('   r_' || Rec.Sequence || '(i).' ||
+                       Rec_Sub.Argument_Name || ':=' || 'p_' ||
+                       Rec.Sequence || '(i).' || Rec_Sub.Argument_Name || ';');
+            
+            End If;
+          
+          End Loop;
+          Put_Line('  end loop;');
+          Put_Line('  end if;');
         End If;
         Put_Line('  return r_' || Rec.Sequence || ';');
         Put_Line('  end;'); --END;
       
+        ---------------------------------
       Elsif Rec.In_Out = 'OUT' Then
         Put('  FUNCTION ' || 'sqltopl_' || Rec.Sequence || '(');
         Put_Line('p_' || Rec.Sequence || ' ' || Rec.Type_Name || '.' ||
-                 Rec.Type_Subname || ') return ' || Rec.Wrapped_Objname || ';');
+                 Rec.Type_Subname || ') return ' || Rec.Wrapped_Objname ||
+                 ' as ');
+      
+        --定义方式和数据类型有关
+        If Rec.Data_Type = 'PL/SQL RECORD' Then
+          Put_Line('   r_' || Rec.Sequence || ' ' || Rec.Wrapped_Objname || ';');
+        Else
+          --PL/SQL TABLE
+          Put_Line('   r_' || Rec.Sequence || ' ' || Rec.Wrapped_Objname ||
+                   ' := ' || Rec.Wrapped_Objname || '();');
+        End If;
+      
+        Put_Line('  begin'); --BEGIN
+      
+        --数值交换方式和数据类型有关 由于总体游标，我们按照倒序遍历，一般，深层次的转换已经实现了
+        If Rec.Data_Type = 'PL/SQL RECORD' Then
+          --单行数据，对子层级的对象遍历赋值，遇到嵌套类型，直接用函数转换。
+          For Rec_Sub In (Select v.*,
+                                 Max(v.Sequence) Over() As Max_Seq,
+                                 Min(v.Sequence) Over() As Min_Seq
+                            From Cux_All_Arguments_v v
+                           Where 1 = 1
+                             And v.Parent_Sequence = Rec.Sequence
+                             And v.Package_Name = Upper(p_Package_Name)
+                             And v.Object_Name = Upper(p_Object_Name)
+                          
+                           Order By Sequence Asc) Loop
+            If Rec_Sub.Sequence = Rec_Sub.Min_Seq Then
+            
+              Put_Line('    r_' || Rec.Sequence || ':=' ||
+                       Rec.Wrapped_Objname || '(');
+            End If;
+          
+            If Rec_Sub.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD') Then
+              Put('        ' || Rec_Sub.Argument_Name || '=>' ||
+                  l_Package_Name || '.sqltopl_' || Rec_Sub.Sequence || '(' || 'p_' ||
+                  Rec.Sequence || '.' || Rec_Sub.Argument_Name || ')');
+            
+            Else
+              Put('        ' || Rec_Sub.Argument_Name || '=>' || 'p_' ||
+                  Rec.Sequence || '.' || Rec_Sub.Argument_Name || '');
+            
+            End If;
+          
+            If Rec_Sub.Sequence = Rec_Sub.Max_Seq Then
+            
+              Put_Line(');');
+            Else
+              Put_Line(',');
+            
+            End If;
+          
+          End Loop;
+        
+        Else
+          --
+          --PL/SQL TABLE
+          --table需要循环赋值
+          Put_Line('  if p_' || Rec.Sequence || '.count > 0 then');
+          Put_Line('  for i in 1 .. p_' || Rec.Sequence || '.count loop');
+          --单行数据，对子层级的对象遍历赋值，遇到嵌套类型，直接用函数转换。
+          For Rec_Sub In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                            From Cux_All_Arguments_v v
+                           Where 1 = 1
+                             And v.Parent_Sequence = Rec.Sequence
+                             And v.Package_Name = Upper(p_Package_Name)
+                             And v.Object_Name = Upper(p_Object_Name)
+                          
+                           Order By Sequence Desc) Loop
+          
+            If Rec_Sub.Data_Type In ('PL/SQL TABLE', 'PL/SQL RECORD') Then
+              Put_Line('    r_' || Rec.Sequence || '(i)' ||
+                       Rec_Sub.Argument_Name || ':=' || l_Package_Name ||
+                       '.sqltopl_' || Rec_Sub.Sequence || '(' || 'p_' ||
+                       Rec.Sequence || '(i)' || Rec_Sub.Argument_Name || ');');
+            
+            Else
+              Put_Line('   r_' || Rec.Sequence || '(i).' ||
+                       Rec_Sub.Argument_Name || ':=' || 'p_' ||
+                       Rec.Sequence || '(i).' || Rec_Sub.Argument_Name || ';');
+            
+            End If;
+          
+          End Loop;
+          Put_Line('  end loop;');
+          Put_Line('  end if;');
+        End If;
+        Put_Line('  return r_' || Rec.Sequence || ';');
+        Put_Line('  end;'); --END;
       Else
         --INOUT? 应该不允许吧
         Null;
@@ -575,10 +674,9 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
       If Rec.Sequence = Rec.Max_Seq Then
       
         --datalevel=0
-        --打印基础的包裹的过程
-      
-        For Rec_Lvl0 In (Select v.*,
-                                Max(v.Sequence) Over() As Max_Seq
+        --打印基础的包裹的过程 start
+        --声明部分
+        For Rec_Lvl0 In (Select v.*, Max(v.Sequence) Over() As Max_Seq
                            From Cux_All_Arguments_v v
                           Where 1 = 1
                             And v.Package_Name = Upper(p_Package_Name)
@@ -587,22 +685,85 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
                           Order By Sequence Asc) Loop
         
           If Rec_Lvl0.Sequence = 1 Then
-            Put_Line('PROCEDURE ' || Rec.Object_Name || '(');
+            Put_Line('  PROCEDURE ' || Rec.Object_Name || '(');
           End If;
         
-          Put(' ' || Rec_Lvl0.Argument_Name || ' ' || Rec_Lvl0.In_Out || ' ' ||
+          Put('    ' || Rec_Lvl0.Argument_Name || ' ' || Rec_Lvl0.In_Out || ' ' ||
               Rec_Lvl0.Wrapped_Objname);
         
           If Rec_Lvl0.Sequence = Rec_Lvl0.Max_Seq Then
             --打印函数结束
-            Put_Line(');');
+            Put_Line(') AS');
           Else
             --打印逗号；
             Put_Line(',');
           End If;
         End Loop;
+        --变量部分
+        For Rec_Lvl0 In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                           From Cux_All_Arguments_v v
+                          Where 1 = 1
+                            And v.Package_Name = Upper(p_Package_Name)
+                            And v.Object_Name = Upper(p_Object_Name)
+                            And v.Data_Level = 0
+                          Order By Sequence Asc) Loop
+        
+          Put_Line('    p_' || Rec_Lvl0.Argument_Name || ' ' ||
+                   Rec_Lvl0.Type_Name || '.' || Rec_Lvl0.Type_Subname ||
+                   --
+                   Case When Rec_Lvl0.In_Out = 'IN' Then
+                   ':=' || 'pltosql_' || Rec_Lvl0.Sequence || '(' ||
+                   Rec_Lvl0.Argument_Name || ')' Else Null End
+                   --
+                   || ';');
+        
+        End Loop;
+        --实现部分
+        Put_Line(' Begin');
+        For Rec_Lvl0 In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                           From Cux_All_Arguments_v v
+                          Where 1 = 1
+                            And v.Package_Name = Upper(p_Package_Name)
+                            And v.Object_Name = Upper(p_Object_Name)
+                            And v.Data_Level = 0
+                          Order By Sequence Asc) Loop
+          If Rec_Lvl0.Sequence = 1 Then
+            Put_Line('    ' || Rec.Package_Name || Rec.Object_Name || '(');
+          End If;
+        
+          Put('    ' || Rec_Lvl0.Argument_Name || '=>' || ' p_' ||
+              Rec_Lvl0.Argument_Name);
+        
+          If Rec_Lvl0.Sequence = Rec_Lvl0.Max_Seq Then
+          
+            --打印函数结束
+            Put_Line(');');
+          
+            --返回值
+            For Rec_Sub In (Select v.*, Max(v.Sequence) Over() As Max_Seq
+                              From Cux_All_Arguments_v v
+                             Where 1 = 1
+                               And v.Package_Name = Upper(p_Package_Name)
+                               And v.Object_Name = Upper(p_Object_Name)
+                               And v.Data_Level = 0
+                               And v.In_Out = 'OUT'
+                             Order By Sequence Asc) Loop
+            
+              Put_Line('    ' || Rec_Sub.Argument_Name || ':=' ||
+                       'sqltopl_' || Rec_Sub.Sequence || '(p_' ||
+                       Rec_Lvl0.Argument_Name || ');');
+            
+            End Loop;
+          Else
+            --打印逗号；
+            Put_Line(',');
+          End If;
+        End Loop;
+        Put_Line(' end;');
       
-        --打印in参数，out参数合并的过程
+        --打印基础的包裹的过程 end
+      
+        --打印in参数，out参数合并的过程 start
         --init counter
         l_Counter := 1;
       
@@ -613,11 +774,9 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
            And v.Package_Name = Upper(p_Package_Name)
            And v.Object_Name = Upper(p_Object_Name)
            And v.Data_Level = 0
-           And v.In_Out In ('IN',
-                            'OUT');
+           And v.In_Out In ('IN', 'OUT');
       
-        If Nvl(l_Countend,
-               0) >= l_Counter Then
+        If Nvl(l_Countend, 0) >= l_Counter Then
         
           For Rec_Bind_Obj In (Select v.*
                                  From Cux_All_Arguments_v v
@@ -639,11 +798,11 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
           
             -- 首行打印声明
             If l_Counter = 1 Then
-              Put_Line('PROCEDURE ' || Rec.Object_Name || '(');
+              Put_Line('  PROCEDURE ' || Rec.Object_Name || '(');
             End If;
           
             If Rec_Bind_Obj.In_Out = 'IN' Then
-              Put('P_IN IN ' ||
+              Put('    P_IN IN ' ||
                   --
                   Substr(Rec.Package_Name || '$' || Rec.Object_Name,
                          0,
@@ -656,7 +815,7 @@ Create Or Replace Package Body Cux_11gapi_Wrapper_Pkg Is
             End If;
           
             If Rec_Bind_Obj.In_Out = 'OUT' Then
-              Put('P_OUT IN ' ||
+              Put('    P_OUT IN ' ||
                   --
                   Substr(Rec.Package_Name || '$' || Rec.Object_Name,
                          0,
